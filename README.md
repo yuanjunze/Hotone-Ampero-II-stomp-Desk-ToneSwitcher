@@ -25,18 +25,6 @@ Hotone Ampero II stomp 效果器桌面音色切换助手
 
 ## 🖼️ 界面预览
 
-你可以在这里放一张程序截图，例如：
-
-```text
-repo/
-├─ ampero_gui.py
-├─ README.md
-└─ assets/
-   └─ preview.png
-```
-
-然后在 README 中加入：
-
 ```md
 ![preview](assets/preview.png)
 ```
