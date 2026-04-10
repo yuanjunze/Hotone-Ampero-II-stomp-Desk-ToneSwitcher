@@ -25,9 +25,9 @@ Hotone Ampero II stomp 效果器桌面音色切换助手
 
 ## 🖼️ 界面预览
 
-```md
+
 ![preview](assets/preview.png)
-```
+
 
 ---
 
