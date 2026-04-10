@@ -1,4 +1,5 @@
-# 🎛️ Ampero MIDI Controller
+# 🎛️ Hotone Ampero II stomp Desk ToneSwitcher
+Hotone Ampero II stomp 效果器桌面音色切换助手
 
 一个基于 **Python + Tkinter + MIDI** 的桌面控制器，用来从电脑控制 **Hotone Ampero II Stomp** 切换音色、翻组、切换 Scene，以及打开/关闭 Tuner。
 
