@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Ampero II Stomp 桌面 MIDI 控制器（中文界面 / 深色风格）
 
@@ -9,8 +10,10 @@ Ampero II Stomp 桌面 MIDI 控制器（中文界面 / 深色风格）
 - 上一音色 / 下一音色
 - 上一组 / 下一组（保持当前 slot）
 - 切换 Scene 1~5
+- Tuner 开 / 关
 - 记住上次使用的端口 / 通道 / bank
-- 自动尝试加载同目录下的 icon.ico / icon.png 作为程序图标
+- 自动尝试加载 icon.ico / icon.png 作为程序图标
+- 兼容 PyInstaller 打包
 
 依赖：
     pip install mido python-rtmidi
@@ -31,6 +34,17 @@ from typing import Optional
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+# ---- PyInstaller / mido backend 兼容 ----
+try:
+    import rtmidi  # noqa: F401
+except Exception:
+    rtmidi = None  # noqa: F841
+
+try:
+    import mido.backends.rtmidi  # noqa: F401
+except Exception:
+    pass
+
 try:
     import mido
 except ImportError as exc:
@@ -38,21 +52,18 @@ except ImportError as exc:
         "缺少依赖 mido\n请先安装：pip install mido python-rtmidi"
     ) from exc
 
+try:
+    mido.set_backend("mido.backends.rtmidi")
+except Exception:
+    pass
+
+
 TOTAL_BANKS = 100
 SLOTS_PER_BANK = 3
 CONFIG_PATH = Path.home() / ".ampero_gui_config.json"
 WINDOW_TITLE = "Ampero II Stomp 控制器"
-def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
 
-
-APP_DIR = get_app_dir()
-ICON_ICO = APP_DIR / "icon.ico"
-ICON_PNG = APP_DIR / "icon.png"
-
-# 配色：参考用户喜欢的深色音频控制面板风格
+# 配色：参考深色音频控制面板风格
 BG = "#15171d"
 PANEL = "#20232b"
 PANEL_2 = "#262a33"
@@ -62,7 +73,6 @@ TEXT = "#f2f4f8"
 TEXT_DIM = "#b5bcc8"
 TEXT_SOFT = "#8e97a6"
 ACCENT = "#17c964"
-ACCENT_BLUE = "#4a8dff"
 ACCENT_RED = "#ff4d5d"
 BUTTON = "#2b303a"
 BUTTON_HOVER = "#353b47"
@@ -73,6 +83,40 @@ BORDER = "#343945"
 PATCH_COLORS = ["#d14b56", "#9f62ff", "#4a8dff"]
 SCENE_COLORS = ["#2e9bff", "#1fbf75", "#ff9f1a", "#b86bff", "#ff5f7a"]
 FONT_FAMILY = "Microsoft YaHei UI"
+
+
+def get_app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+APP_DIR = get_app_dir()
+
+
+def get_resource_dirs() -> list[Path]:
+    """
+    图标搜索顺序：
+    1) exe 同目录 / 脚本同目录
+    2) PyInstaller onefile 解包目录 _MEIPASS
+    """
+    dirs: list[Path] = []
+    dirs.append(APP_DIR)
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass)
+        if p not in dirs:
+            dirs.append(p)
+    return dirs
+
+
+def find_resource(filename: str) -> Optional[Path]:
+    for d in get_resource_dirs():
+        p = d / filename
+        if p.exists():
+            return p
+    return None
 
 
 @dataclass(frozen=True)
@@ -115,7 +159,10 @@ class PatchAddress:
 
 
 def list_output_ports() -> list[str]:
-    return list(mido.get_output_names())
+    try:
+        return list(mido.get_output_names())
+    except Exception as exc:
+        raise RuntimeError(f"读取 MIDI 端口失败：{exc}") from exc
 
 
 def resolve_port_name(requested: str) -> str:
@@ -191,8 +238,8 @@ class App:
         self.current_patch_var = tk.StringVar(value="当前目标：—")
         self.detail_var = tk.StringVar(value="CC0：—    PC：—")
         self.status_var = tk.StringVar(value="就绪")
-        self.tuner_on = False
-        self.tuner_btn_var = tk.StringVar(value="Tuner")
+        self.tuner_on = bool(self.config.get("tuner_on", False))
+        self.tuner_btn_var = tk.StringVar(value="Tuner 关闭" if self.tuner_on else "Tuner")
 
         self.setup_styles()
         self.apply_icon()
@@ -230,16 +277,27 @@ class App:
         )
 
     def apply_icon(self) -> None:
+        """
+        窗口图标与 exe 图标是两回事。
+        这里设置的是“程序打开后的窗口图标”。
+
+        优先级：
+        1) icon.ico（最稳，Windows 推荐）
+        2) icon.png
+        """
+        ico_path = find_resource("icon.ico")
+        png_path = find_resource("icon.png")
+
         try:
-            if ICON_ICO.exists():
-                self.root.iconbitmap(default=str(ICON_ICO))
+            if ico_path is not None:
+                self.root.iconbitmap(default=str(ico_path))
                 return
         except Exception:
             pass
 
         try:
-            if ICON_PNG.exists():
-                self.icon_image = tk.PhotoImage(file=str(ICON_PNG))
+            if png_path is not None:
+                self.icon_image = tk.PhotoImage(file=str(png_path))
                 self.root.iconphoto(True, self.icon_image)
         except Exception:
             pass
@@ -314,6 +372,7 @@ class App:
             font=(FONT_FAMILY, 11),
             justify="center",
             width=8,
+            command=self.save_config,
         )
         self.channel_spin.pack(anchor="w", padx=12, pady=(0, 12))
 
@@ -328,14 +387,15 @@ class App:
             "↑ / ↓  上一组 / 下一组",
             "1 / 2 / 3  选当前组音色",
             "Enter  跳转到输入的 Patch",
+            "T  打开 / 关闭 Tuner",
         ]
         for line in shortcuts:
             tk.Label(help_card, text=line, bg=PANEL, fg=TEXT_DIM, font=(FONT_FAMILY, 10), anchor="w").pack(fill="x", padx=12, pady=2)
 
         bottom = tk.Frame(parent, bg=SIDEBAR)
         bottom.pack(side="bottom", fill="x", padx=16, pady=18)
-        tk.Label(bottom, text="图标文件：icon.ico / icon.png", bg=SIDEBAR, fg=TEXT_SOFT, font=(FONT_FAMILY, 9)).pack(anchor="w")
-        tk.Label(bottom, text="放到脚本同目录即可自动加载", bg=SIDEBAR, fg=TEXT_SOFT, font=(FONT_FAMILY, 9)).pack(anchor="w", pady=(4, 0))
+        tk.Label(bottom, text="窗口图标建议使用 icon.ico", bg=SIDEBAR, fg=TEXT_SOFT, font=(FONT_FAMILY, 9)).pack(anchor="w")
+        tk.Label(bottom, text="可放在 exe 同目录，或用 --add-data 打包进去", bg=SIDEBAR, fg=TEXT_SOFT, font=(FONT_FAMILY, 9)).pack(anchor="w", pady=(4, 0))
 
     def build_header(self, parent: tk.Frame) -> None:
         header = tk.Frame(parent, bg=BG)
@@ -478,7 +538,7 @@ class App:
         inner.pack(fill="x", padx=16, pady=(0, 14))
         inner.grid_columnconfigure(0, weight=1)
 
-        entry = tk.Entry(
+        self.patch_entry_widget = tk.Entry(
             inner,
             textvariable=self.patch_entry_var,
             bg=PANEL_3,
@@ -488,8 +548,10 @@ class App:
             bd=0,
             font=(FONT_FAMILY, 14),
         )
-        entry.grid(row=0, column=0, sticky="ew", ipady=10)
-        DarkButton(inner, text="跳转", command=self.send_patch_from_entry, width=10, height=2).grid(row=0, column=1, padx=(10, 0))
+        self.patch_entry_widget.grid(row=0, column=0, sticky="ew", ipady=10)
+        self.patch_entry_widget.bind("<Return>", lambda _e: self._send_patch_from_entry_and_release_focus())
+        self.patch_entry_widget.bind("<Escape>", lambda _e: self._release_text_focus())
+        DarkButton(inner, text="跳转", command=self._send_patch_from_entry_and_release_focus, width=10, height=2).grid(row=0, column=1, padx=(10, 0))
         tk.Label(inner, text="示例：P12-3", bg=PANEL, fg=TEXT_SOFT, font=(FONT_FAMILY, 10)).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
     def build_nav_card(self, parent: tk.Frame) -> None:
@@ -552,20 +614,43 @@ class App:
         self.status_label = tk.Label(footer, textvariable=self.status_var, bg=PANEL_3, fg=TEXT_DIM, font=(FONT_FAMILY, 10))
         self.status_label.pack(side="left", padx=14)
 
+    def _focus_is_text_input(self) -> bool:
+        widget = self.root.focus_get()
+        if widget is None:
+            return False
+        cls = widget.winfo_class()
+        return cls in {"Entry", "TEntry", "Spinbox", "TCombobox", "Combobox"}
+
+    def _release_text_focus(self) -> None:
+        self.root.focus_set()
+
+    def _send_patch_from_entry_and_release_focus(self) -> None:
+        self.send_patch_from_entry()
+        self._release_text_focus()
+
     def bind_shortcuts(self) -> None:
-        self.root.bind("<Return>", lambda _e: self.send_patch_from_entry())
-        self.root.bind("<Left>", lambda _e: self.send_cc_patch_step(prev=True))
-        self.root.bind("<Right>", lambda _e: self.send_cc_patch_step(prev=False))
-        self.root.bind("<Up>", lambda _e: self.send_bank_step(prev=False))
-        self.root.bind("<Down>", lambda _e: self.send_bank_step(prev=True))
-        self.root.bind("1", lambda _e: self.send_patch(slot=1))
-        self.root.bind("2", lambda _e: self.send_patch(slot=2))
-        self.root.bind("3", lambda _e: self.send_patch(slot=3))
-        self.root.bind("t", lambda _e: self.toggle_tuner())
-        self.root.bind("T", lambda _e: self.toggle_tuner())
+        self.root.bind("<Control-l>", lambda _e: self.patch_entry_widget.focus_set())
+        self.root.bind("<Escape>", lambda _e: self._release_text_focus())
+        self.root.bind("<Left>", lambda _e: None if self._focus_is_text_input() else self.send_cc_patch_step(prev=True))
+        self.root.bind("<Right>", lambda _e: None if self._focus_is_text_input() else self.send_cc_patch_step(prev=False))
+        self.root.bind("<Up>", lambda _e: None if self._focus_is_text_input() else self.send_bank_step(prev=False))
+        self.root.bind("<Down>", lambda _e: None if self._focus_is_text_input() else self.send_bank_step(prev=True))
+        self.root.bind("1", lambda _e: None if self._focus_is_text_input() else self.send_patch(slot=1))
+        self.root.bind("2", lambda _e: None if self._focus_is_text_input() else self.send_patch(slot=2))
+        self.root.bind("3", lambda _e: None if self._focus_is_text_input() else self.send_patch(slot=3))
+        self.root.bind("t", lambda _e: None if self._focus_is_text_input() else self.toggle_tuner())
+        self.root.bind("T", lambda _e: None if self._focus_is_text_input() else self.toggle_tuner())
 
     def refresh_ports(self, initial: bool = False) -> None:
-        ports = list_output_ports()
+        try:
+            ports = list_output_ports()
+        except Exception as exc:
+            self.port_combo["values"] = []
+            self.port_var.set("")
+            self.set_status(str(exc), error=True)
+            self.update_connection_indicator(ok=False)
+            return
+
         self.port_combo["values"] = ports
         if not ports:
             self.port_var.set("")
@@ -703,7 +788,7 @@ class App:
             self.tuner_on = turn_on
             self.tuner_btn_var.set("Tuner 关闭" if self.tuner_on else "Tuner")
             self.set_status("已打开调音器" if self.tuner_on else "已关闭调音器")
-            self.save_config()
+            self.save_config(tuner_on=self.tuner_on)
         except Exception as exc:
             messagebox.showerror("Tuner 错误", str(exc))
             self.set_status(f"错误：{exc}", error=True)

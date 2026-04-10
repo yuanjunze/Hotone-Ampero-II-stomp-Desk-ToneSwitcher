@@ -4,3 +4,5 @@
 /ampero_midi_controller.py
 /build
 /dist
+*.spec
+/ampero_gui_old.py
