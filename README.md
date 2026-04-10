@@ -165,14 +165,8 @@ pip install pyinstaller
 然后执行：
 
 ```bash
-pyinstaller --onefile --windowed --name "Ampero MIDI Controller" --icon icon.ico ampero_gui.py
+pyinstaller --onefile --windowed --name "Ampero MIDI Controller" --icon icon.png --hidden-import mido.backends.rtmidi .\ampero_gui.py
 ```
-
-### 参数说明
-- `--onefile`：打包成单文件
-- `--windowed`：运行时不弹黑色终端窗口
-- `--name`：生成的 exe 名称
-- `--icon`：指定 exe 图标
 
 打包完成后，生成的文件通常位于：
 
@@ -182,7 +176,7 @@ dist/Ampero MIDI Controller.exe
 
 ---
 
-## 📁 项目结构建议
+## 📁 项目结构
 
 ```text
 ampero-midi-controller/
