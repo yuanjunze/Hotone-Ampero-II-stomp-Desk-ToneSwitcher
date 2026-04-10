@@ -1,0 +1,6 @@
+/.vscode
+/Ampero MIDI Controller.spec
+/ampero_gui_pyinstaller_fix.py
+/ampero_midi_controller.py
+/build
+/dist
